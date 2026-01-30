@@ -8,21 +8,10 @@ import argparse
 import gzip
 import os
 import struct
-import urllib.request
 
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-
-# MNIST 下载镜像（按优先级尝试，国内可尝试 AWS）
-# 也可手动下载到 mnist_data/ 后直接运行
-# 天池: https://tianchi.aliyun.com/dataset/206667
-MNIST_URLS = [
-    "https://ossci-datasets.s3.amazonaws.com/mnist/",  # AWS（国内相对较快）
-    "https://storage.googleapis.com/cvdf-datasets/mnist/",  # Google
-    "http://yann.lecun.com/exdb/mnist/",  # 官方
-]
 
 
 # ============ 激活函数 ============
@@ -86,38 +75,22 @@ class TwoLayerNet:
 
 # ============ 训练与评估 ============
 
-def _download_mnist_file(filename, data_dir="mnist_data"):
-    """从镜像下载 MNIST 文件"""
-    os.makedirs(data_dir, exist_ok=True)
-    filepath = os.path.join(data_dir, filename)
-    if os.path.exists(filepath):
-        return filepath
-    for base in MNIST_URLS:
-        try:
-            url = base + filename
-            print(f"  从 {url} 下载...")
-            urllib.request.urlretrieve(url, filepath)
-            return filepath
-        except Exception as e:
-            print(f"  失败: {e}")
-    raise RuntimeError("所有镜像均无法下载，请手动下载 MNIST 到 mnist_data/ 目录")
-
 def _read_mnist_images(filepath):
+    """读取 MNIST 图像文件"""
     with gzip.open(filepath, "rb") as f:
         magic, n, rows, cols = struct.unpack(">IIII", f.read(16))
         return np.frombuffer(f.read(), dtype=np.uint8).reshape(n, rows * cols)
 
 def _read_mnist_labels(filepath):
+    """读取 MNIST 标签文件"""
     with gzip.open(filepath, "rb") as f:
         struct.unpack(">II", f.read(8))
         return np.frombuffer(f.read(), dtype=np.uint8)
 
-def load_mnist(data_dir="mnist_data", use_mirror=True):
+def load_mnist(data_dir="mnist_data"):
     """
-    加载 MNIST 数据集
-    use_mirror=True: 从镜像下载（AWS/Google/官方）
-    use_mirror=False: 使用 sklearn fetch_openml（需联网，可能较慢）
-    data_dir: 本地缓存目录，若已有 4 个 .gz 文件则直接使用
+    加载 MNIST 数据集（从本地目录）
+    data_dir: MNIST 数据目录，应包含 4 个 .gz 文件
     """
     print("加载 MNIST...")
     files = [
@@ -126,23 +99,23 @@ def load_mnist(data_dir="mnist_data", use_mirror=True):
         "t10k-images-idx3-ubyte.gz",
         "t10k-labels-idx1-ubyte.gz",
     ]
-    if use_mirror:
-        paths = [_download_mnist_file(f, data_dir) for f in files]
-        X_train = _read_mnist_images(paths[0]) / 255.0
-        y_train = _read_mnist_labels(paths[1])
-        X_test = _read_mnist_images(paths[2]) / 255.0
-        y_test = _read_mnist_labels(paths[3])
-    else:
-        from sklearn.datasets import fetch_openml
-        mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
-        X, y = mnist.data, mnist.target.astype(int)
-        X = X / 255.0
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
+    
+    paths = [os.path.join(data_dir, f) for f in files]
+    
+    # 检查文件是否存在
+    for path in paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"找不到文件: {path}\n请确保 MNIST 数据集在 {data_dir} 目录中")
+    
+    X_train = _read_mnist_images(paths[0]) / 255.0
+    y_train = _read_mnist_labels(paths[1])
+    X_test = _read_mnist_images(paths[2]) / 255.0
+    y_test = _read_mnist_labels(paths[3])
+    
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
+    
     return X_train, y_train, X_test, y_test
 
 
@@ -227,7 +200,6 @@ def main():
     parser.add_argument("--lr", type=float, default=0.15, help="学习率")
     parser.add_argument("--hidden", type=int, default=512, help="隐藏层神经元数")
     parser.add_argument("--data-dir", type=str, default="mnist_data", help="MNIST 数据目录")
-    parser.add_argument("--no-mirror", action="store_true", help="使用 sklearn 加载（不用镜像）")
     parser.add_argument("--seed", type=int, default=42, help="随机种子")
     parser.add_argument("--save-plot", type=str, default=None, help="保存训练曲线到文件")
     parser.add_argument("--no-plot", action="store_true", help="不显示训练曲线")
@@ -238,9 +210,7 @@ def main():
     print("=" * 50)
     print(f"参数: epochs={args.epochs}, batch_size={args.batch_size}, lr={args.lr}, hidden={args.hidden}")
 
-    X_train, y_train, X_test, y_test = load_mnist(
-        data_dir=args.data_dir, use_mirror=not args.no_mirror
-    )
+    X_train, y_train, X_test, y_test = load_mnist(data_dir=args.data_dir)
     print(f"训练集: {X_train.shape[0]}, 测试集: {X_test.shape[0]}")
 
     model = TwoLayerNet(hidden_size=args.hidden, seed=args.seed)
